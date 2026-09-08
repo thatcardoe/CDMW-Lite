@@ -116,7 +116,14 @@ public sealed class ArchiveItemNameIndexService(
             }
             finally
             {
-                DeleteOwnedWorkDirectory(workRoot);
+                // DEBUG ONLY — remove before shipping a real build. Set
+                // CDMW_ARCHIVE_LITE_KEEP_NAME_INDEX_WORKDIR=1 to skip cleanup so payloads\iteminfo.bin
+                // (and its .header.bin, stringinfo/equiptypeinfo counterparts) survive for inspection
+                // in a hex editor instead of being deleted the moment the build finishes.
+                if (Environment.GetEnvironmentVariable("CDMW_ARCHIVE_LITE_KEEP_NAME_INDEX_WORKDIR") != "1")
+                {
+                    DeleteOwnedWorkDirectory(workRoot);
+                }
             }
         }
         finally
