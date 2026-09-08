@@ -60,6 +60,7 @@ internal static class ArchiveLiteTestRunner
             ("native model previews start immediately and warm-cache hits stay delay-free", TestNativeModelPreviewCacheDwellAsync),
             ("known item names preserve exact matches and propagate related evidence", TestArchiveItemNamesAsync),
             ("native item-name discovery reads every row of the table directory", TestArchiveItemNameDiscoveryAsync),
+            ("item-name discovery finds the post-2026-09-04 staticinfobody/staticinfoheader naming", TestArchiveItemNameDiscoveryStaticInfoNamingAsync),
             ("an archive with no row directory degrades to a scan and says so", TestArchiveItemNameScanFallbackAsync),
             ("a string table that disagrees with its own footer is rejected, not truncated", TestLocalizationTableIntegrityAsync),
             ("Item Finder shares the Full catalog contract and keeps icon work bounded", TestItemFinderCatalogAsync),
@@ -4952,6 +4953,55 @@ internal static class ArchiveLiteTestRunner
             "the merged item-name sort ordered evidence-only rows as if they had no name");
 
         await RequireChunkedIconWarmupAsync(sessions, session, service, native, opened.SessionId).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The 2026-09-04 game update renamed iteminfo.pabgb/.pabgh (and the stringinfo/equiptypeinfo
+    /// pair beside it) to iteminfo.staticinfobody/.staticinfoheader. Discovery has to find the table
+    /// under either name, and an archive packed only with the new names has to reach the same
+    /// row-directory read as the old-named fixture in <see cref="TestArchiveItemNameDiscoveryAsync"/>
+    /// rather than falling back to a degraded scan or reporting the table missing altogether, which
+    /// is what version 1.0.3 did against a 2.01.00+ archive.
+    /// </summary>
+    private static async Task TestArchiveItemNameDiscoveryStaticInfoNamingAsync()
+    {
+        await using var fixture = await SyntheticArchiveFixture.CreateNameIndexAsync(useStaticInfoNaming: true)
+            .ConfigureAwait(false);
+        var native = new NativeArchiveCore();
+        using var sessions = new ArchiveSessionManager(native);
+        var opened = await sessions.OpenAsync(
+            new OpenArchiveRequest(fixture.Root, ForceRefresh: true),
+            CancellationToken.None).ConfigureAwait(false);
+        var service = new ArchiveItemNameIndexService(sessions, native);
+        var result = await service.BuildAsync(
+            new BuildNameIndexRequest(opened.SessionId),
+            null,
+            CancellationToken.None).ConfigureAwait(false);
+        Require(
+            result.Available,
+            $"staticinfobody/staticinfoheader naming was not recognized: {result.Warning}");
+        Require(
+            result.Warning is null,
+            $"staticinfobody naming reached the row directory but still reported a degraded read: {result.Warning}");
+        Require(
+            result.ExactNameCount > 0 && result.RelatedNameCount > 0,
+            "staticinfobody naming did not publish both mapping kinds");
+
+        var catalog = await new ArchiveItemCatalogService(sessions, service).SearchAsync(
+            new ItemCatalogSearchRequest(opened.SessionId),
+            CancellationToken.None).ConfigureAwait(false);
+        var scannable = catalog.Items.SingleOrDefault(item => item.ItemId == 1234);
+        var directoryOnly = catalog.Items.SingleOrDefault(item => item.ItemId == 5678);
+        Require(
+            scannable is not null && scannable.DisplayName == SyntheticArchiveFixture.ScannableItemName,
+            "staticinfobody naming did not recover the item the row directory names");
+        Require(
+            directoryOnly is not null && directoryOnly.DisplayName == SyntheticArchiveFixture.DirectoryOnlyItemName,
+            "staticinfobody naming did not recover the row directory's own-header-suffix item");
+        Require(
+            scannable!.EquipType == SyntheticArchiveFixture.HelmEquipType
+            && directoryOnly!.EquipType == SyntheticArchiveFixture.UpperbodyEquipType,
+            "equiptypeinfo.staticinfobody was not paired with its .staticinfoheader row directory");
     }
 
     /// <summary>
