@@ -205,6 +205,15 @@ public sealed class ArchiveItemNameIndexService(
         return sources;
     }
 
+    // The 2026-09-04 game update renamed every gamedata table blob and its row directory: what
+    // shipped as <name>.pabgb / <name>.pabgh now ships as <name>.staticinfobody /
+    // <name>.staticinfoheader (iteminfo, stringinfo, and equiptypeinfo included). Both suffix
+    // pairs are matched below so an archive on either side of that update is found the same way;
+    // nothing about the row-directory pairing or the downstream native parse depends on which
+    // suffix a given install uses.
+    private static readonly string[] TableBlobSuffixes = [".pabgb", ".staticinfobody"];
+    private static readonly string[] TableHeaderSuffixes = [".pabgh", ".staticinfoheader"];
+
     private static void FindSource(NameIndexSources sources, ArchiveEntryDto entry)
     {
         var lowerPath = entry.Path.Replace('\\', '/').ToLowerInvariant();
@@ -212,22 +221,22 @@ public sealed class ArchiveItemNameIndexService(
         var packageGroup = Path.GetFileName(Path.GetDirectoryName(entry.SourcePamt))?.ToLowerInvariant() ?? string.Empty;
         if (packageGroup == "0008")
         {
-            if (sources.ItemInfo is null && lowerPath.Contains("iteminfo.pabgb", StringComparison.Ordinal))
+            if (sources.ItemInfo is null && PathContainsStem(lowerPath, "iteminfo", TableBlobSuffixes))
             {
                 sources.ItemInfo = entry;
             }
-            else if (sources.StringInfo is null && basename == "stringinfo.pabgb")
+            else if (sources.StringInfo is null && BasenameIsStem(basename, "stringinfo", TableBlobSuffixes))
             {
                 sources.StringInfo = entry;
             }
-            else if (sources.EquipTypeInfo is null && basename == "equiptypeinfo.pabgb")
+            else if (sources.EquipTypeInfo is null && BasenameIsStem(basename, "equiptypeinfo", TableBlobSuffixes))
             {
                 sources.EquipTypeInfo = entry;
             }
-            else if (lowerPath.EndsWith(".pabgh", StringComparison.Ordinal))
+            else if (EndsWithAny(lowerPath, TableHeaderSuffixes))
             {
-                // Each table blob ships beside a same-named .pabgh row directory holding one entry
-                // per row. Collected by path here and paired with its blob once the pass is over,
+                // Each table blob ships beside a same-named row directory holding one entry per
+                // row. Collected by path here and paired with its blob once the pass is over,
                 // because either half can appear first and several tables share a name suffix.
                 sources.RowDirectories[lowerPath] = entry;
             }
@@ -245,6 +254,42 @@ public sealed class ArchiveItemNameIndexService(
                 break;
             }
         }
+    }
+
+    private static bool PathContainsStem(string lowerPath, string stem, string[] suffixes)
+    {
+        foreach (var suffix in suffixes)
+        {
+            if (lowerPath.Contains(stem + suffix, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool BasenameIsStem(string basename, string stem, string[] suffixes)
+    {
+        foreach (var suffix in suffixes)
+        {
+            if (basename == stem + suffix)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool EndsWithAny(string lowerPath, string[] suffixes)
+    {
+        foreach (var suffix in suffixes)
+        {
+            if (lowerPath.EndsWith(suffix, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private async Task ExtractSourcesAsync(
@@ -388,8 +433,9 @@ public sealed class ArchiveItemNameIndexService(
     /// <summary>
     /// Two things can leave a catalog short of what the archive holds, and both have to reach the
     /// caller rather than pass for a complete result. The indexer reads item records out of the
-    /// .pabgh row directory, and without one it falls back to scanning for a byte pattern that only
-    /// a minority of records present. Separately, a string table whose records do not agree with
+    /// row directory (.pabgh, or .staticinfoheader on a post-2026-09-04 archive), and without one
+    /// it falls back to scanning for a byte pattern that only a minority of records present.
+    /// Separately, a string table whose records do not agree with
     /// the count in its footer is rejected whole, because a partial read of it would silently drop
     /// names rather than fail.
     /// </summary>
@@ -694,14 +740,24 @@ public sealed class ArchiveItemNameIndexService(
         public Dictionary<string, ArchiveEntryDto> Localizations { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, ArchiveEntryDto> RowDirectories { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>The .pabgh directory stored beside <paramref name="blob"/>, if the archive has one.</summary>
+        /// <summary>
+        /// The row-directory file stored beside <paramref name="blob"/>, if the archive has one.
+        /// A .pabgb blob pairs with a .pabgh directory; its post-2026-09-04 replacement,
+        /// .staticinfobody, pairs with .staticinfoheader instead. The blob's own suffix decides
+        /// which header suffix to look for, so a mixed archive (some tables still on the old
+        /// names, others migrated) still pairs each blob with its own header correctly.
+        /// </summary>
         public ArchiveEntryDto? RowDirectoryFor(ArchiveEntryDto? blob)
         {
             if (blob is null)
             {
                 return null;
             }
-            var header = Path.ChangeExtension(blob.Path.Replace('\\', '/'), ".pabgh").ToLowerInvariant();
+            var lowerBlobPath = blob.Path.Replace('\\', '/').ToLowerInvariant();
+            var headerSuffix = lowerBlobPath.EndsWith(".staticinfobody", StringComparison.Ordinal)
+                ? ".staticinfoheader"
+                : ".pabgh";
+            var header = Path.ChangeExtension(lowerBlobPath, headerSuffix);
             return RowDirectories.GetValueOrDefault(header);
         }
     }
