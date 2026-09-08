@@ -254,9 +254,17 @@ internal sealed class SyntheticArchiveFixture : IAsyncDisposable
     /// When true the string table's footer declares more records than the table holds, which is a
     /// buffer no reader should accept as a partially valid string table.
     /// </param>
+    /// <param name="useStaticInfoNaming">
+    /// When true, the three table blobs and their row directories are packed under the names the
+    /// 2026-09-04 game update ships (iteminfo.staticinfobody / .staticinfoheader, and the same for
+    /// stringinfo and equiptypeinfo) instead of the earlier .pabgb / .pabgh names. Everything else
+    /// about the package is identical, so a test can diff the two naming schemes against the same
+    /// row content.
+    /// </param>
     public static async Task<SyntheticArchiveFixture> CreateNameIndexAsync(
         bool includeRowDirectory = true,
-        bool corruptLocalization = false)
+        bool corruptLocalization = false,
+        bool useStaticInfoNaming = false)
     {
         const uint exactModelHash = 0x1D586E71;        // cd_test_01_sword
         const uint relatedModelHash = 0xA1B2C3D4;
@@ -311,17 +319,20 @@ internal sealed class SyntheticArchiveFixture : IAsyncDisposable
         ],
         corruptLocalization ? 1 : 0);
 
+        var (blobSuffix, headerSuffix) = useStaticInfoNaming
+            ? (".staticinfobody", ".staticinfoheader")
+            : (".pabgb", ".pabgh");
         var tables = new List<(string Path, byte[] Bytes)>
         {
-            ("gamecommon/item/iteminfo.pabgb", itemInfo),
-            ("gamecommon/item/stringinfo.pabgb", stringInfo),
-            ("gamecommon/item/equiptypeinfo.pabgb", equipTypeInfo),
+            ($"gamecommon/item/iteminfo{blobSuffix}", itemInfo),
+            ($"gamecommon/item/stringinfo{blobSuffix}", stringInfo),
+            ($"gamecommon/item/equiptypeinfo{blobSuffix}", equipTypeInfo),
         };
         if (includeRowDirectory)
         {
-            tables.Add(("gamecommon/item/iteminfo.pabgh", itemInfoDirectory));
-            tables.Add(("gamecommon/item/stringinfo.pabgh", stringInfoDirectory));
-            tables.Add(("gamecommon/item/equiptypeinfo.pabgh", equipTypeInfoDirectory));
+            tables.Add(($"gamecommon/item/iteminfo{headerSuffix}", itemInfoDirectory));
+            tables.Add(($"gamecommon/item/stringinfo{headerSuffix}", stringInfoDirectory));
+            tables.Add(($"gamecommon/item/equiptypeinfo{headerSuffix}", equipTypeInfoDirectory));
         }
 
         await BuildPackageAsync(root, "0008", tables).ConfigureAwait(false);
