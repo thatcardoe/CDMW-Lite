@@ -55,3 +55,30 @@ jobs:
           name: CDMW-Archive-Lite-win-x64
           path: artifacts/CDMW-Archive-Lite-*-win-x64.zip
           if-no-files-found: error
+
+  standalone:
+    name: Standalone single-file EXE
+    if: github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Verify, test, and package (standalone)
+        shell: pwsh
+        run: .\scripts\build_archive_lite.ps1 -StandaloneOnly
+
+      - name: Upload standalone executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: CDMW-Archive-Lite-Standalone-win-x64
+          path: artifacts/CDMW-Archive-Lite-*-Standalone-win-x64.exe
+          if-no-files-found: error
