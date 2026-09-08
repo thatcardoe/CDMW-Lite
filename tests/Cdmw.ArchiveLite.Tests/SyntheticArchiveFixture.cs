@@ -567,10 +567,14 @@ internal sealed class SyntheticArchiveFixture : IAsyncDisposable
         // The equip-type key sits five bytes past the display-name sub-record.
         output.Write(new byte[5]);
         WriteUInt32(output, equipTypeHash);
-        output.WriteByte(0x0E);
-        output.WriteByte(0);
-        output.WriteByte(0);
-        WriteUInt32(output, 6);
+        // Post-2026-09-04 record layout, confirmed against a real Sermena_Fabric_Armor row: no
+        // marker byte and no duplicated count ahead of a prefab-hash list, just a single u32 count
+        // immediately followed by that many u32 values. The first list here is a decoy the scanner
+        // must walk past without producing a name from it (its values match nothing in the model
+        // hash table); the second, single-entry list is the item's real, exact model reference.
+        // relatedModelHash is deliberately left out of both lists and placed as unconsumed filler
+        // afterward, so it stays reachable only through the icon-hash path this fixture also sets
+        // up, keeping the exact-match and related-evidence code paths under separate coverage.
         WriteUInt32(output, 6);
         WriteUInt32(output, 0x11111111);
         WriteUInt32(output, 0x22222222);
@@ -578,10 +582,6 @@ internal sealed class SyntheticArchiveFixture : IAsyncDisposable
         WriteUInt32(output, 0x44444444);
         WriteUInt32(output, 0x55555555);
         WriteUInt32(output, 0x66666666);
-        output.WriteByte(0x0F);
-        output.WriteByte(0);
-        output.WriteByte(0);
-        WriteUInt32(output, 1);
         WriteUInt32(output, 1);
         WriteUInt32(output, exactModelHash);
         WriteUInt32(output, relatedModelHash);
