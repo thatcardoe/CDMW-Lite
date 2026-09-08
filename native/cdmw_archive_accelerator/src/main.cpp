@@ -1347,27 +1347,31 @@ void fill_item_record_body(
         if (record.display_name.empty() && !record.localized_names.empty()) record.display_name = record.localized_names.front();
     }
 
+    // The list-marker byte (0x0E/0x0F/0x10) and its duplicated count field, both present through at
+    // least the pre-2026-09-04 client, are gone from the item record body as of that update: what a
+    // list looked like there — one marker byte, 3 pad bytes, two matching u32 counts, then the list —
+    // is now just a single u32 count immediately followed by the list, no marker and no second count.
+    // Confirmed against a real Sermena_Fabric_Armor record: 14 sequential u32 values (0x000F4AD8
+    // through 0x000F4AE5, i.e. a 14-entry id run) sit right after a u32 that reads exactly 14, with
+    // nothing else between them, and the byte the old marker check would have read at that position
+    // is 0x00 — not 0x0E/0x0F/0x10 — which is why the old scan found zero lists in every record on
+    // this client rather than misreading a few: nothing in the file matches its marker byte anymore.
     std::set<std::uint32_t> seen_prefab_hashes;
     size_t scan = scan_begin;
-    while (scan + 15 < record_end && record.prefab_hashes.size() < 128) {
-        const unsigned char list_marker = static_cast<unsigned char>(data[scan]);
-        if (list_marker != 0x0E && list_marker != 0x0F && list_marker != 0x10) {
+    while (scan + 4 <= record_end && record.prefab_hashes.size() < 128) {
+        const std::uint32_t count = read_u32(data, scan);
+        if (count == 0 || count > 32) {
             ++scan;
             continue;
         }
-        const std::uint32_t count1 = read_u32(data, scan + 3);
-        const std::uint32_t count2 = read_u32(data, scan + 7);
-        if (!(count1 > 0 && count1 <= 32 && count2 > 0 && count2 <= 32)) {
-            ++scan;
-            continue;
-        }
-        const size_t list_end = scan + 11 + static_cast<size_t>(count2) * 4;
+        const size_t list_start = scan + 4;
+        const size_t list_end = list_start + static_cast<size_t>(count) * 4;
         if (list_end > record_end) {
             ++scan;
             continue;
         }
-        for (std::uint32_t hash_index = 0; hash_index < count2; ++hash_index) {
-            const std::uint32_t value = read_u32(data, scan + 11 + hash_index * 4);
+        for (std::uint32_t hash_index = 0; hash_index < count; ++hash_index) {
+            const std::uint32_t value = read_u32(data, list_start + hash_index * 4);
             if (value && seen_prefab_hashes.insert(value).second) record.prefab_hashes.push_back(value);
         }
         scan = list_end;
